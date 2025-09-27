@@ -304,20 +304,55 @@ def create_make_gif_frame(root, home_frame):
             frames = []
             for p in selected_image_paths:
                 img = Image.open(p)
+                # 确保图片有透明通道
+                if img.mode != 'RGBA':
+                    img = img.convert('RGBA')
                 if target_w and target_h:
                     img = img.resize((max(1, target_w), max(1, target_h)), Image.LANCZOS)
-                frames.append(img.convert("P", palette=Image.ADAPTIVE))
+                frames.append(img)
+            
+            # 检查是否有透明像素
+            has_transparency = False
+            for frame in frames:
+                if frame.mode == 'RGBA':
+                    # 检查是否有真正的透明像素（alpha < 255）
+                    if 'transparency' in frame.info or frame.mode == 'RGBA':
+                        # 更精确的透明检测
+                        if frame.mode == 'RGBA':
+                            # 获取alpha通道
+                            alpha = frame.split()[-1]
+                            # 检查是否有非完全不透明的像素
+                            if alpha.getextrema()[0] < 255:
+                                has_transparency = True
+                                break
+            
             save_kwargs = dict(
-               save_all=True,
+                save_all=True,
                 append_images=frames[1:],
                 duration=max(1, duration_ms),
                 optimize=False,
                 disposal=2,
             )
+            
+            # 如果有透明背景，使用RGBA模式保存
+            if has_transparency:
+                save_kwargs["save_all"] = True
+                # 保持RGBA模式以保留透明信息
+                frames[0].save(save_path, **save_kwargs)
+            else:
+                # 没有透明背景时，转换为P模式以减小文件大小
+                p_frames = []
+                for frame in frames:
+                    p_frames.append(frame.convert("P", palette=Image.ADAPTIVE))
+                save_kwargs["append_images"] = p_frames[1:]
+                p_frames[0].save(save_path, **save_kwargs)
+            
             # 循环播放：勾选则 loop=0（无限），不勾选则不写 loop 参数（只播放一遍）
             if loop_var.get():
+                # 重新保存以添加loop参数
+                temp_frames = frames if has_transparency else p_frames
                 save_kwargs["loop"] = 0
-            frames[0].save(save_path, **save_kwargs)
+                temp_frames[0].save(save_path, **save_kwargs)
             messagebox.showinfo("成功", "动图已保存")
         except Exception as e:
             messagebox.showerror("错误", f"保存失败:\n{e}")
@@ -447,9 +482,15 @@ def create_split_gif_frame(root, home_frame):
             im = Image.open(gif_path)
             index = 0
             for frame_img in ImageSequence.Iterator(im):
-                rgba = frame_img.convert("RGBA")
+                # 确保保持透明背景
+                if frame_img.mode != 'RGBA':
+                    rgba = frame_img.convert("RGBA")
+                else:
+                    rgba = frame_img.copy()
+                
                 filename = f"frame_{index:04d}.png"
-                rgba.save(os.path.join(out_dir, filename))
+                # 保存为PNG格式以保持透明背景
+                rgba.save(os.path.join(out_dir, filename), "PNG")
                 index += 1
             messagebox.showinfo("成功", f"共导出 {index} 帧")
         except Exception as e:
